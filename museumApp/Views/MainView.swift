@@ -3,6 +3,7 @@ import SwiftUI
 enum SidebarItem: Hashable {
     case inbox
     case all
+    case graph
     case collection(BlockCollection.ID)
 }
 
@@ -22,7 +23,7 @@ struct MainView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            gallery
+            content
                 .background(Color.paper(colorScheme))
                 .toolbar {
                     ToolbarItem {
@@ -85,6 +86,8 @@ struct MainView: View {
                 .tag(SidebarItem.inbox)
             Label("All", systemImage: "square.grid.2x2")
                 .tag(SidebarItem.all)
+            Label("Graph", systemImage: "point.3.connected.trianglepath.dotted")
+                .tag(SidebarItem.graph)
 
             Section("Collections") {
                 ForEach(library.collections) { collection in
@@ -108,12 +111,25 @@ struct MainView: View {
         .navigationSplitViewColumnWidth(min: 180, ideal: 210)
     }
 
+    // MARK: Content
+
+    @ViewBuilder
+    private var content: some View {
+        if selection == .graph {
+            GraphView(onOpen: { openBlock = $0 })
+                .navigationTitle("Graph")
+        } else {
+            gallery
+        }
+    }
+
     // MARK: Gallery
 
     private var title: String {
         switch selection {
         case .inbox, nil: "Inbox"
         case .all: "All"
+        case .graph: "Graph"
         case .collection(let id): library.collections.first { $0.id == id }?.name ?? "Collection"
         }
     }
@@ -122,6 +138,7 @@ struct MainView: View {
         switch selection {
         case .inbox, nil: library.inbox
         case .all: library.library
+        case .graph: []
         case .collection(let id):
             library.collections.first { $0.id == id }.map(library.blocks(in:)) ?? []
         }

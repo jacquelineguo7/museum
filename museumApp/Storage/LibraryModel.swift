@@ -7,6 +7,10 @@ final class LibraryModel {
     private(set) var blocks: [Block] = []
     private(set) var collections: [BlockCollection] = []
     private(set) var libraryURL: URL?
+    /// Who links to whom, rebuilt whenever the library changes.
+    private(set) var linkIndex = LinkIndex()
+    /// Bumps on every change, so views can cheaply tell when to refresh derived data.
+    private(set) var revision = 0
     var errorMessage: String?
 
     private var store: (any LibraryStore)?
@@ -64,6 +68,7 @@ final class LibraryModel {
         libraryURL = nil
         blocks = []
         collections = []
+        refreshDerived()
         LibraryLocation.forget()
     }
 
@@ -87,6 +92,7 @@ final class LibraryModel {
         let snapshot = try await store.loadAll()
         blocks = snapshot.blocks
         collections = snapshot.collections.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        refreshDerived()
     }
 
     // MARK: Blocks
@@ -145,6 +151,7 @@ final class LibraryModel {
         do {
             try await store.delete(block)
             blocks.removeAll { $0.id == block.id }
+            refreshDerived()
             for var collection in collections where collection.blockIDs.contains(block.id) {
                 collection.blockIDs.removeAll { $0 == block.id }
                 await update(collection)
@@ -173,6 +180,24 @@ final class LibraryModel {
         } else {
             blocks.append(block)
         }
+        refreshDerived()
+    }
+
+    private func refreshDerived() {
+        linkIndex = LinkIndex(blocks: blocks)
+        revision += 1
+    }
+
+    /// The block a `[[title]]` link points to.
+    func block(titled title: String) -> Block? {
+        guard let id = linkIndex.blockID(titled: title) else { return nil }
+        return blocks.first { $0.id == id }
+    }
+
+    /// Blocks that link to this one.
+    func backlinks(to block: Block) -> [Block] {
+        let ids = Set(linkIndex.backlinks[block.id] ?? [])
+        return blocks.filter { ids.contains($0.id) }.sorted { $0.createdAt > $1.createdAt }
     }
 
     // MARK: Collections
@@ -192,6 +217,7 @@ final class LibraryModel {
                 collections.append(collection)
                 collections.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             }
+            revision += 1
         } catch {
             errorMessage = "Couldn't save collection: \(error.localizedDescription)"
         }
@@ -202,6 +228,7 @@ final class LibraryModel {
         do {
             try await store.delete(collection)
             collections.removeAll { $0.id == collection.id }
+            revision += 1
         } catch {
             errorMessage = "Couldn't delete collection: \(error.localizedDescription)"
         }

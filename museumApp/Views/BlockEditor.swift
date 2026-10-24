@@ -22,6 +22,9 @@ struct BlockEditor: View {
     @State private var tagsText: String
     @State private var pendingImage: CapturedImage?
     @State private var isChoosingImage = false
+    @State private var notesSelection: TextSelection?
+    @State private var isPickingLink = false
+    @State private var linkTypedAsBrackets = false
     @State private var suggestedTags: [String] = []
     @State private var isSuggesting = false
     @State private var suggestionMessage: String?
@@ -75,7 +78,7 @@ struct BlockEditor: View {
 
                 Section {
                     ZStack(alignment: .topLeading) {
-                        TextEditor(text: $notes)
+                        TextEditor(text: $notes, selection: $notesSelection)
                             .font(.system(.body, design: .serif))
                             .scrollContentBackground(.hidden)
                             .focused($focus, equals: .notes)
@@ -90,7 +93,16 @@ struct BlockEditor: View {
                         }
                     }
                 } header: {
-                    Text("Why does this matter?")
+                    HStack {
+                        Text("Why does this matter?")
+                        Spacer()
+                        Button("Link", systemImage: "link") { isPickingLink = true }
+                            .keyboardShortcut("k")
+                            .help("Link to another block (⌘K, or type [[)")
+                            .popover(isPresented: $isPickingLink, arrowEdge: .bottom) {
+                                LinkPicker(excluding: existing?.id, onPick: insertLink)
+                            }
+                    }
                 } footer: {
                     Text("Leave this empty to keep it in your Inbox and come back to it later.")
                 }
@@ -137,6 +149,16 @@ struct BlockEditor: View {
         }
         .frame(minWidth: 500, idealWidth: 540, minHeight: 540)
         .onAppear { focus = existing == nil ? .content : .notes }
+        // Typing [[ at the end of the note opens the link picker.
+        .onChange(of: notes) { _, text in
+            if text.hasSuffix("[["), !isPickingLink {
+                linkTypedAsBrackets = true
+                isPickingLink = true
+            }
+        }
+        .onChange(of: isPickingLink) { _, isShowing in
+            if !isShowing { linkTypedAsBrackets = false; focus = .notes }
+        }
         .fileImporter(isPresented: $isChoosingImage, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result { loadImage(from: url) }
         }
@@ -218,6 +240,21 @@ struct BlockEditor: View {
         if !tags.contains(tag) { tags.append(tag) }
         tagsText = tags.joined(separator: ", ")
         suggestedTags.removeAll { $0 == tag }
+    }
+
+    /// Inserts `[[Title]]` where you were typing: replacing a typed `[[`, at the cursor, or at the end.
+    private func insertLink(to target: Block) {
+        let link = "[[\(WikiLinks.linkText(for: target.title))]]"
+        if linkTypedAsBrackets, notes.hasSuffix("[[") {
+            notes.removeLast(2)
+            notes += link
+        } else if let selection = notesSelection, case .selection(let range) = selection.indices, range.upperBound <= notes.endIndex {
+            notes.replaceSubrange(range, with: link)
+        } else {
+            if let last = notes.last, !last.isWhitespace { notes += " " }
+            notes += link
+        }
+        isPickingLink = false
     }
 
     private func cancel() {

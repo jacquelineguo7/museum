@@ -136,10 +136,17 @@ struct BlockDetailView: View {
             // Collapsed to a few lines so the artifact stays the focus.
             let isLong = text.count > 240 || text.filter(\.isNewline).count >= 4
             VStack(alignment: .leading, spacing: 6) {
-                Text(text)
+                Text(linked(text))
                     .font(.system(.body, design: .serif))
                     .lineLimit(notesExpanded ? nil : 4)
                     .textSelection(.enabled)
+                    .environment(\.openURL, OpenURLAction { url in
+                        // [[links]] are shown as museum://block/<id> links.
+                        guard url.scheme == "museum", let id = UUID(uuidString: url.lastPathComponent),
+                              let target = library.blocks.first(where: { $0.id == id }) else { return .systemAction }
+                        onOpen(target)
+                        return .handled
+                    })
                 if isLong {
                     Button(notesExpanded ? "Show less" : "Show more") { notesExpanded.toggle() }
                         .buttonStyle(.plain)
@@ -152,6 +159,16 @@ struct BlockDetailView: View {
 
     @ViewBuilder
     private var footer: some View {
+        let linkedFrom = library.backlinks(to: current)
+        if !linkedFrom.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Linked from").font(.caption).foregroundStyle(.secondary)
+                ForEach(linkedFrom) { source in
+                    Button(source.title) { onOpen(source) }
+                        .buttonStyle(.link)
+                }
+            }
+        }
         if !current.tags.isEmpty {
             Text(current.tags.map { "#\($0)" }.joined(separator: "  "))
                 .font(.callout)
@@ -175,15 +192,20 @@ extension BlockDetailView {
                 Text(connectionMessage).font(.callout).foregroundStyle(.secondary)
             }
             ForEach(related ?? []) { suggestion in
-                Button { onOpen(suggestion.block) } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(suggestion.block.title).font(.system(.body, design: .serif))
-                        Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .top) {
+                    Button { onOpen(suggestion.block) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(suggestion.block.title).font(.system(.body, design: .serif))
+                            Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    // Adds a plain [[link]] to your notes; the explanation isn't copied in.
+                    Button("Link", systemImage: "link") { addLink(to: suggestion.block) }
+                        .disabled(library.linkIndex.outgoing[current.id]?.contains(suggestion.block.id) == true)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -207,5 +229,35 @@ extension BlockDetailView {
                 connectionMessage = "Couldn't look for connections: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+// MARK: Links in notes
+
+extension BlockDetailView {
+    /// Notes with each `[[link]]` turned into a tappable link (or dimmed text if nothing matches).
+    fileprivate func linked(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        var cursor = text.startIndex
+        for match in WikiLinks.matches(in: text) {
+            result += AttributedString(String(text[cursor..<match.range.lowerBound]))
+            var piece = AttributedString(match.label)
+            if let target = library.block(titled: match.target), let url = URL(string: "museum://block/\(target.id.uuidString)") {
+                piece.link = url
+            } else {
+                piece.foregroundColor = .secondary
+            }
+            result += piece
+            cursor = match.range.upperBound
+        }
+        result += AttributedString(String(text[cursor...]))
+        return result
+    }
+
+    fileprivate func addLink(to target: Block) {
+        var updated = current
+        let separator = updated.notes.isEmpty ? "" : "\n\n"
+        updated.notes += "\(separator)See also [[\(WikiLinks.linkText(for: target.title))]]"
+        Task { await library.update(updated) }
     }
 }
