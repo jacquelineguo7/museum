@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 import UniformTypeIdentifiers
 
 /// The form for saving something new or editing a block later. Deliberately looks
@@ -14,12 +15,12 @@ struct BlockEditor: View {
     @Environment(LibraryModel.self) private var library
     @Environment(\.dismiss) private var dismiss
 
-    @State private var content = ""      // pasted link, quote or thought (new blocks)
+    @State private var content: String   // pasted link, quote or thought (new blocks)
     @State private var title: String     // title, or the text itself for quotes and thoughts (edits)
     @State private var urlText: String
     @State private var notes: String
     @State private var tagsText: String
-    @State private var imageURL: URL?
+    @State private var pendingImage: CapturedImage?
     @State private var isChoosingImage = false
     @State private var prompt = Self.prompts.randomElement() ?? ""
     @FocusState private var focus: Field?
@@ -34,9 +35,15 @@ struct BlockEditor: View {
         "What does it remind you of?",
     ]
 
-    init(existing: Block? = nil, onFinish: @escaping () -> Void = {}) {
+    /// - Parameter captured: something dropped onto the window, to prefill a new entry with.
+    init(existing: Block? = nil, captured: CapturedContent? = nil, onFinish: @escaping () -> Void = {}) {
         self.existing = existing
         self.onFinish = onFinish
+        switch captured {
+        case .text(let text): _content = State(initialValue: text)
+        case .image(let image): _content = State(initialValue: ""); _pendingImage = State(initialValue: image)
+        case nil: _content = State(initialValue: "")
+        }
         _title = State(initialValue: existing?.title ?? "")
         _urlText = State(initialValue: existing?.url?.absoluteString ?? "")
         _notes = State(initialValue: existing?.notes ?? "")
@@ -49,7 +56,7 @@ struct BlockEditor: View {
 
     private var canSave: Bool {
         if existing != nil { return true }
-        return imageURL != nil || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return pendingImage != nil || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -111,7 +118,7 @@ struct BlockEditor: View {
         .frame(minWidth: 500, idealWidth: 540, minHeight: 540)
         .onAppear { focus = existing == nil ? .content : .notes }
         .fileImporter(isPresented: $isChoosingImage, allowedContentTypes: [.image]) { result in
-            if case .success(let url) = result { imageURL = url }
+            if case .success(let url) = result { loadImage(from: url) }
         }
     }
 
@@ -122,15 +129,19 @@ struct BlockEditor: View {
         TextField("Link, quote or thought", text: $content, prompt: Text("Paste a link, quote or thought"), axis: .vertical)
             .lineLimit(2...6)
             .focused($focus, equals: .content)
-        HStack {
-            Button("Choose Image…", systemImage: "photo") { isChoosingImage = true }
-            if let imageURL {
-                Text(imageURL.lastPathComponent).foregroundStyle(.secondary).lineLimit(1)
-                Button("Remove", systemImage: "xmark.circle.fill") { self.imageURL = nil }
+        if let pendingImage {
+            HStack(alignment: .top) {
+                if let thumbnail = Self.thumbnail(from: pendingImage.data) {
+                    thumbnail.resizable().scaledToFit().frame(maxHeight: 120).clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                Spacer()
+                Button("Remove Image", systemImage: "xmark.circle.fill") { self.pendingImage = nil }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
             }
+        } else {
+            Button("Choose Image…", systemImage: "photo") { isChoosingImage = true }
         }
     }
 
@@ -181,20 +192,13 @@ struct BlockEditor: View {
         return block
     }
 
-    /// Returns false if the image couldn't be read.
     private func addNew() async -> Bool {
         let input = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let imageURL {
-            let didAccess = imageURL.startAccessingSecurityScopedResource()
-            defer { if didAccess { imageURL.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: imageURL) else {
-                library.errorMessage = "Couldn't read that image."
-                return false
-            }
-            var block = Block(kind: .image, title: input.isEmpty ? imageURL.deletingPathExtension().lastPathComponent : input)
+        if let pendingImage {
+            var block = Block(kind: .image, title: input.isEmpty ? pendingImage.name : input)
             block.notes = notes
             block.tags = parsedTags
-            await library.add(block, imageData: data, imageExtension: imageURL.pathExtension.lowercased())
+            await library.add(block, imageData: pendingImage.data, imageExtension: pendingImage.fileExtension)
         } else {
             var block = Self.makeBlock(from: input)
             block.notes = notes
@@ -202,6 +206,26 @@ struct BlockEditor: View {
             await library.add(block)
         }
         return true
+    }
+
+    private func loadImage(from url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            library.errorMessage = "Couldn't read that image."
+            return
+        }
+        pendingImage = CapturedImage(data: data, name: url.deletingPathExtension().lastPathComponent, fileExtension: url.pathExtension.lowercased())
+    }
+
+    private static func thumbnail(from data: Data) -> Image? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 480,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary).map { Image(decorative: $0, scale: 1) }
     }
 
     private nonisolated static func stripWWW(_ host: String) -> String {

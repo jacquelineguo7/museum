@@ -5,6 +5,8 @@ struct EmptyStateView: View {
     let title: String
     let systemImage: String
     let message: String
+    var actionTitle: String?
+    var action: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -18,6 +20,9 @@ struct EmptyStateView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action).padding(.top, 4)
+            }
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

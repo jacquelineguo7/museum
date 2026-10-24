@@ -13,6 +13,8 @@ struct MainView: View {
     @State private var selection: SidebarItem? = .inbox
     @State private var openBlock: Block?
     @State private var isAdding = false
+    @State private var captured: CapturedContent?
+    @State private var isDropTargeted = false
     @State private var isNamingCollection = false
     @State private var newCollectionName = ""
 
@@ -35,7 +37,28 @@ struct MainView: View {
                     }
                 }
         }
-        .sheet(isPresented: $isAdding) { BlockEditor() }
+        .sheet(isPresented: $isAdding, onDismiss: { captured = nil }) { BlockEditor(captured: captured) }
+        // Drop an image, link or text anywhere on the window to start a new entry.
+        .onDrop(of: DropReader.acceptedTypes, isTargeted: $isDropTargeted) { providers in
+            Task {
+                if let content = await DropReader.read(providers) {
+                    captured = content
+                    isAdding = true
+                } else {
+                    library.errorMessage = "Museum can save images, links and text. That item wasn't one of those."
+                }
+            }
+            return true
+        }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(.tint, style: StrokeStyle(lineWidth: 3, dash: [10, 6]))
+                    .overlay { Label("Drop to save", systemImage: "arrow.down.circle").font(.title2).foregroundStyle(.tint) }
+                    .padding(10)
+                    .allowsHitTesting(false)
+            }
+        }
         .sheet(item: $openBlock) { block in
             BlockDetailView(block: block, onWander: { Task { openBlock = await library.wander(excluding: block.id) } })
         }
@@ -108,6 +131,7 @@ struct MainView: View {
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 16, alignment: .top)], spacing: 20) {
+                    addTile
                     ForEach(blocks) { block in
                         BlockCard(block: block, imageURL: library.assetURL(for: block))
                             .onTapGesture { openBlock = block }
@@ -119,6 +143,22 @@ struct MainView: View {
         }
     }
 
+    /// A clickable first cell: click it to save something new.
+    private var addTile: some View {
+        Button { isAdding = true } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "plus").font(.title2)
+                Text("Add something").font(.callout)
+                Text("or drop it here").font(.caption).foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 120)
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var emptyState: some View {
         switch selection {
@@ -126,7 +166,9 @@ struct MainView: View {
             EmptyStateView(
                 title: "Nothing waiting",
                 systemImage: "tray",
-                message: "Save a link, image, quote or thought with ⌘N. Anything saved without a note waits here until you say why it matters."
+                message: "Save a link, image, quote or thought with ⌘N, or drop one onto the window. Anything saved without a note waits here until you say why it matters.",
+                actionTitle: "Add Something",
+                action: { isAdding = true }
             )
         default:
             EmptyStateView(
