@@ -8,6 +8,8 @@ nonisolated enum WikiLinks {
         var target: String
         /// What to show in place of the link.
         var label: String
+        /// True for `[[Title|label]]`, where the label was written out.
+        var hasLabel: Bool
     }
 
     static func matches(in text: String) -> [Match] {
@@ -15,8 +17,23 @@ nonisolated enum WikiLinks {
         return text.matches(of: regex).compactMap { match in
             guard let target = match.output[1].substring?.trimmingCharacters(in: .whitespaces), !target.isEmpty else { return nil }
             let label = match.output[2].substring.map { $0.trimmingCharacters(in: .whitespaces) }
-            return Match(range: match.range, target: target, label: label.flatMap { $0.isEmpty ? nil : $0 } ?? target)
+            let explicitLabel = label.flatMap { $0.isEmpty ? nil : $0 }
+            return Match(range: match.range, target: target, label: explicitLabel ?? target, hasLabel: explicitLabel != nil)
         }
+    }
+
+    /// Rewrites every link for which `isTarget` is true so it points at `newTitle`, keeping any
+    /// `|label`. Returns nil if nothing changed.
+    static func retarget(_ text: String, where isTarget: (String) -> Bool, to newTitle: String) -> String? {
+        var result = text
+        var changed = false
+        // Work from the end so earlier ranges stay valid.
+        for match in matches(in: text).reversed() where isTarget(match.target) {
+            let replacement = match.hasLabel ? "[[\(linkText(for: newTitle))|\(match.label)]]" : "[[\(linkText(for: newTitle))]]"
+            result.replaceSubrange(match.range, with: replacement)
+            changed = true
+        }
+        return changed ? result : nil
     }
 
     /// How a title is written inside `[[ ]]`: brackets and bars would break the link, so they become spaces.

@@ -140,6 +140,14 @@ final class LibraryModel {
     func update(_ block: Block) async {
         guard let store else { return }
         do {
+            // Renaming a block would orphan the [[links]] that point to it, so rewrite them first.
+            var block = block
+            if let old = blocks.first(where: { $0.id == block.id }), WikiLinks.key(for: old.title) != WikiLinks.key(for: block.title) {
+                if let rewritten = WikiLinks.retarget(block.notes, where: { linkIndex.blockID(titled: $0) == block.id }, to: block.title) {
+                    block.notes = rewritten
+                }
+                try await relink(to: block, from: old.title)
+            }
             replace(try await store.save(block))
         } catch {
             errorMessage = "Couldn't save: \(error.localizedDescription)"
@@ -186,6 +194,17 @@ final class LibraryModel {
     private func refreshDerived() {
         linkIndex = LinkIndex(blocks: blocks)
         revision += 1
+    }
+
+    /// Points every other block's `[[old title]]` links at the renamed block's new title.
+    private func relink(to renamed: Block, from oldTitle: String) async throws {
+        guard let store, !renamed.title.isEmpty else { return }
+        for other in blocks where other.id != renamed.id {
+            guard let notes = WikiLinks.retarget(other.notes, where: { linkIndex.blockID(titled: $0) == renamed.id }, to: renamed.title) else { continue }
+            var edited = other
+            edited.notes = notes
+            replace(try await store.save(edited))
+        }
     }
 
     /// The block a `[[title]]` link points to.

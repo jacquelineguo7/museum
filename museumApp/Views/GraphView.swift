@@ -9,6 +9,7 @@ struct GraphView: View {
 
     @State private var data = GraphData()
     @State private var positions: [Block.ID: CGPoint] = [:]
+    @State private var thumbnails: [Block.ID: CGImage] = [:]
     @State private var showShared = true
     @State private var hovered: Block.ID?
     @State private var zoom: CGFloat = 1
@@ -51,6 +52,14 @@ struct GraphView: View {
             data = latest
             positions = await GraphLayout.compute(latest)
         }
+        // Blocks with an image show it inside their dot.
+        .task(id: library.revision) {
+            for block in library.library where thumbnails[block.id] == nil {
+                guard let url = library.assetURL(for: block),
+                      let image = await ImageLoading.thumbnail(at: url, maxPixelSize: 96) else { continue }
+                thumbnails[block.id] = image
+            }
+        }
     }
 
     // MARK: Drawing
@@ -65,7 +74,9 @@ struct GraphView: View {
 
     private func radius(of id: Block.ID) -> CGFloat {
         let degree = (library.linkIndex.outgoing[id]?.count ?? 0) + (library.linkIndex.backlinks[id]?.count ?? 0)
-        return 5 + CGFloat(min(degree, 8))
+        let base = 5 + CGFloat(min(degree, 8))
+        // Dots that hold an image are drawn larger so it's recognisable.
+        return thumbnails[id] == nil ? base : max(base, 15)
     }
 
     private func canvas(in size: CGSize) -> some View {
@@ -93,7 +104,19 @@ struct GraphView: View {
                 let center = screenPoint(unit, in: size)
                 let r = radius(of: id)
                 let dot = Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
-                context.fill(dot, with: .color(Self.color(for: block.kind)))
+                if let thumbnail = thumbnails[id] {
+                    let image = context.resolve(Image(decorative: thumbnail, scale: 1))
+                    // Fill the circle with the image, cropping the overflow.
+                    let fit = max(r * 2 / image.size.width, r * 2 / image.size.height)
+                    let size = CGSize(width: image.size.width * fit, height: image.size.height * fit)
+                    context.drawLayer { layer in
+                        layer.clip(to: dot)
+                        layer.draw(image, in: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height))
+                    }
+                    context.stroke(dot, with: .color(Self.color(for: block.kind)), lineWidth: 2)
+                } else {
+                    context.fill(dot, with: .color(Self.color(for: block.kind)))
+                }
                 if hovered == id {
                     context.stroke(dot, with: .color(.accentColor), lineWidth: 2.5)
                 }
