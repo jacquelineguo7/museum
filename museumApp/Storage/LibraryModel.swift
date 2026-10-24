@@ -95,10 +95,33 @@ final class LibraryModel {
                 saved = try await store.storeAsset(imageData, filename: "image.\(imageExtension)", for: saved)
             }
             replace(saved)
+            if saved.kind == .link, saved.url != nil {
+                // Fill in the page's title and image in the background.
+                Task { await enrichLink(saved) }
+            }
             return saved
         } catch {
             errorMessage = "Couldn't save: \(error.localizedDescription)"
             return nil
+        }
+    }
+
+    /// Fetches the page's title and preview image and stores them with the block.
+    private func enrichLink(_ original: Block) async {
+        guard let url = original.url, let store, let preview = await LinkPreviewService.fetch(url) else { return }
+        // Start from the latest version, since the user may have edited it meanwhile.
+        guard var current = blocks.first(where: { $0.id == original.id }) else { return }
+        // Don't overwrite a title the user already changed.
+        if let title = preview.title, current.title == original.title { current.title = title }
+        do {
+            if let data = preview.imageData {
+                current = try await store.storeAsset(data, filename: "preview.\(LinkPreviewService.imageExtension(for: data))", for: current)
+            } else {
+                current = try await store.save(current)
+            }
+            replace(current)
+        } catch {
+            errorMessage = "Couldn't save the link preview: \(error.localizedDescription)"
         }
     }
 

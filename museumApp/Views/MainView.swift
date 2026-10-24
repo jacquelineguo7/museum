@@ -35,7 +35,7 @@ struct MainView: View {
                     }
                 }
         }
-        .sheet(isPresented: $isAdding) { AddBlockSheet() }
+        .sheet(isPresented: $isAdding) { BlockEditor() }
         .sheet(item: $openBlock) { block in
             BlockDetailView(block: block, onWander: { Task { openBlock = await library.wander(excluding: block.id) } })
         }
@@ -123,16 +123,16 @@ struct MainView: View {
     private var emptyState: some View {
         switch selection {
         case .inbox, nil:
-            ContentUnavailableView(
-                "Nothing waiting",
+            EmptyStateView(
+                title: "Nothing waiting",
                 systemImage: "tray",
-                description: Text("Save a link, image, quote or thought with ⌘N. It stays here until you say why it matters.")
+                message: "Save a link, image, quote or thought with ⌘N. Anything saved without a note waits here until you say why it matters."
             )
         default:
-            ContentUnavailableView(
-                "Nothing here yet",
+            EmptyStateView(
+                title: "Nothing here yet",
                 systemImage: "square.grid.2x2",
-                description: Text("Blocks appear here once you've written a note about them.")
+                message: "Blocks appear here once you've written a note about them."
             )
         }
     }
