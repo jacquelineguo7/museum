@@ -151,7 +151,7 @@ struct MainView: View {
             emptyState
         } else {
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 16, alignment: .top)], spacing: 20) {
+                MasonryLayout {
                     addTile
                     ForEach(blocks) { block in
                         BlockCard(block: block, imageURL: library.assetURL(for: block))

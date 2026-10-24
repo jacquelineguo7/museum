@@ -35,7 +35,7 @@ struct BlockCard: View {
     private var artifact: some View {
         switch block.kind {
         case .image:
-            LocalImage(url: imageURL)
+            LocalImage(url: imageURL, maxPixelSize: 700)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         case .quote:
             paperCard {
@@ -46,7 +46,7 @@ struct BlockCard: View {
         case .link, .post:
             VStack(alignment: .leading, spacing: 6) {
                 if imageURL != nil {
-                    LocalImage(url: imageURL).clipShape(RoundedRectangle(cornerRadius: 8))
+                    LocalImage(url: imageURL, maxPixelSize: 700).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 if let domain = block.sourceDomain {
                     Text(domain.uppercased())
