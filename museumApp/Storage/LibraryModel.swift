@@ -33,6 +33,12 @@ final class LibraryModel {
         blocks.filter(\.isReflected).sorted { $0.createdAt > $1.createdAt }
     }
 
+    /// Every tag in use, most-used first, so suggestions can reuse them.
+    var knownTags: [String] {
+        let counts = blocks.flatMap(\.tags).reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map(\.key)
+    }
+
     func blocks(in collection: BlockCollection) -> [Block] {
         let ids = Set(collection.blockIDs)
         return library.filter { ids.contains($0.id) }

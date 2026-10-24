@@ -22,6 +22,9 @@ struct BlockEditor: View {
     @State private var tagsText: String
     @State private var pendingImage: CapturedImage?
     @State private var isChoosingImage = false
+    @State private var suggestedTags: [String] = []
+    @State private var isSuggesting = false
+    @State private var suggestionMessage: String?
     @State private var prompt = Self.prompts.randomElement() ?? ""
     @FocusState private var focus: Field?
 
@@ -92,9 +95,26 @@ struct BlockEditor: View {
                     Text("Leave this empty to keep it in your Inbox and come back to it later.")
                 }
 
-                Section("Tags") {
-                    TextField("Tags", text: $tagsText, prompt: Text("typography, swiss, grids"))
-                        .labelsHidden()
+                Section {
+                    HStack {
+                        TextField("Tags", text: $tagsText, prompt: Text("typography, swiss, grids"))
+                            .labelsHidden()
+                        Button(isSuggesting ? "Thinking…" : "Suggest", systemImage: "sparkles", action: suggestTags)
+                            .disabled(isSuggesting || !canSave)
+                    }
+                    if !suggestedTags.isEmpty {
+                        // Tap a suggestion to add it.
+                        HStack {
+                            ForEach(suggestedTags, id: \.self) { tag in
+                                Button("+ \(tag)") { accept(tag) }
+                                    .buttonStyle(.link)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Tags")
+                } footer: {
+                    if let suggestionMessage { Text(suggestionMessage) }
                 }
             }
             .formStyle(.grouped)
@@ -162,6 +182,42 @@ struct BlockEditor: View {
 
     private var parsedTags: [String] {
         tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// The entry as it currently stands in the form, for asking the model about it.
+    private var draftBlock: Block {
+        if let existing { return updated(existing) }
+        let input = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        var block = pendingImage.map { Block(kind: .image, title: input.isEmpty ? $0.name : input) } ?? Self.makeBlock(from: input)
+        block.notes = notes
+        block.tags = parsedTags
+        return block
+    }
+
+    private func suggestTags() {
+        if case .unavailable(let reason) = Intelligence.status {
+            suggestionMessage = reason
+            return
+        }
+        isSuggesting = true
+        suggestionMessage = nil
+        let block = draftBlock
+        Task {
+            defer { isSuggesting = false }
+            do {
+                suggestedTags = try await Intelligence.suggestTags(for: block, knownTags: library.knownTags)
+                if suggestedTags.isEmpty { suggestionMessage = "No new tag suggestions." }
+            } catch {
+                suggestionMessage = "Couldn't get suggestions: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func accept(_ tag: String) {
+        var tags = parsedTags
+        if !tags.contains(tag) { tags.append(tag) }
+        tagsText = tags.joined(separator: ", ")
+        suggestedTags.removeAll { $0 == tag }
     }
 
     private func cancel() {

@@ -60,7 +60,11 @@ struct MainView: View {
             }
         }
         .sheet(item: $openBlock) { block in
-            BlockDetailView(block: block, onWander: { Task { openBlock = await library.wander(excluding: block.id) } })
+            BlockDetailView(
+                block: block,
+                onWander: { Task { openBlock = await library.wander(excluding: block.id) } },
+                onOpen: { openBlock = $0 }
+            )
         }
         .alert("New Collection", isPresented: $isNamingCollection) {
             TextField("Name", text: $newCollectionName)

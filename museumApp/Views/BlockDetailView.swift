@@ -6,6 +6,7 @@ import SwiftUI
 struct BlockDetailView: View {
     let block: Block
     let onWander: () -> Void
+    let onOpen: (Block) -> Void
 
     @Environment(LibraryModel.self) private var library
     @Environment(\.dismiss) private var dismiss
@@ -14,10 +15,14 @@ struct BlockDetailView: View {
     @State private var isEditing: Bool
     @State private var notesExpanded = false
     @State private var isConfirmingDelete = false
+    @State private var related: [RelatedSuggestion]?
+    @State private var isFindingConnections = false
+    @State private var connectionMessage: String?
 
-    init(block: Block, onWander: @escaping () -> Void = {}) {
+    init(block: Block, onWander: @escaping () -> Void = {}, onOpen: @escaping (Block) -> Void = { _ in }) {
         self.block = block
         self.onWander = onWander
+        self.onOpen = onOpen
         _isEditing = State(initialValue: !block.isReflected)
     }
 
@@ -57,6 +62,7 @@ struct BlockDetailView: View {
                     artifact
                     notes
                     footer
+                    connections
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,6 +156,56 @@ struct BlockDetailView: View {
             Text(current.tags.map { "#\($0)" }.joined(separator: "  "))
                 .font(.callout)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: Connections
+
+extension BlockDetailView {
+    /// Entries the on-device model thinks relate to this one. Suggestions only; nothing is saved.
+    @ViewBuilder
+    fileprivate var connections: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(isFindingConnections ? "Looking…" : "Find connections", systemImage: "sparkles", action: findConnections)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(isFindingConnections)
+            if let connectionMessage {
+                Text(connectionMessage).font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(related ?? []) { suggestion in
+                Button { onOpen(suggestion.block) } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(suggestion.block.title).font(.system(.body, design: .serif))
+                        Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    fileprivate func findConnections() {
+        if case .unavailable(let reason) = Intelligence.status {
+            connectionMessage = reason
+            return
+        }
+        isFindingConnections = true
+        connectionMessage = nil
+        let target = current
+        let others = library.blocks
+        Task {
+            defer { isFindingConnections = false }
+            do {
+                let found = try await Intelligence.suggestConnections(for: target, among: others)
+                related = found
+                if found.isEmpty { connectionMessage = "Nothing in your library clearly connects to this yet." }
+            } catch {
+                connectionMessage = "Couldn't look for connections: \(error.localizedDescription)"
+            }
         }
     }
 }
