@@ -14,6 +14,7 @@ struct BlockDetailView: View {
 
     @State private var isEditing: Bool
     @State private var notesExpanded = false
+    @State private var showMarks = true
     @State private var isConfirmingDelete = false
     @State private var related: [RelatedSuggestion]?
     @State private var isFindingConnections = false
@@ -104,14 +105,14 @@ struct BlockDetailView: View {
         let imageURL = library.assetURL(for: current)
         switch current.kind {
         case .image:
-            LocalImage(url: imageURL, maxPixelSize: 2400)
+            markedImage(imageURL)
         case .quote:
             Text("“\(current.title)”")
                 .font(.system(.largeTitle, design: .serif))
                 .padding(.vertical, 12)
         case .link, .post:
             VStack(alignment: .leading, spacing: 10) {
-                if imageURL != nil { LocalImage(url: imageURL) }
+                if imageURL != nil { markedImage(imageURL) }
                 if let domain = current.sourceDomain {
                     Text(domain.uppercased()).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
@@ -166,6 +167,21 @@ struct BlockDetailView: View {
                 ForEach(linkedFrom) { source in
                     Button(source.title) { onOpen(source) }
                         .buttonStyle(.link)
+                }
+            }
+        }
+        let shades = current.annotations.compactMap { annotation -> (hex: String, name: String?)? in
+            if case .color(let hex, let name, _) = annotation.payload { (hex, name) } else { nil }
+        }
+        if !shades.isEmpty {
+            HStack(spacing: 14) {
+                ForEach(Array(shades.enumerated()), id: \.offset) { _, shade in
+                    HStack(spacing: 6) {
+                        Circle().fill(Color(hex: shade.hex) ?? .clear).frame(width: 16, height: 16)
+                            .overlay(Circle().strokeBorder(.secondary.opacity(0.4)))
+                        Text([shade.name, shade.hex].compactMap { $0 }.joined(separator: " "))
+                            .font(.caption).monospaced().textSelection(.enabled)
+                    }
                 }
             }
         }
@@ -259,5 +275,23 @@ extension BlockDetailView {
         let separator = updated.notes.isEmpty ? "" : "\n\n"
         updated.notes += "\(separator)See also [[\(WikiLinks.linkText(for: target.title))]]"
         Task { await library.update(updated) }
+    }
+}
+
+// MARK: Image with marks
+
+extension BlockDetailView {
+    /// The image with its marks drawn on it, and a button to see it clean.
+    @ViewBuilder
+    fileprivate func markedImage(_ url: URL?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            AnnotatedImage(url: url, annotations: current.annotations, showMarks: showMarks)
+            if !current.annotations.isEmpty {
+                Button(showMarks ? "Hide marks" : "Show marks", systemImage: showMarks ? "eye.slash" : "eye") { showMarks.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
